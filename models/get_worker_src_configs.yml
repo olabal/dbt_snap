@@ -1,0 +1,105 @@
+version: 2
+sources:
+  - name: raw_data
+    description: 'Raw data from files'
+    database: |
+      {%- if target.name == "dev" -%} DBT
+      {%- elif target.name == "qa" -%} DBT_QA
+      {%- else -%} invalid_db
+      {%- endif -%}
+
+    schema: |
+      {%- if target.name == "dev" -%} RAW_DATA
+      {%- elif target.name == "qa" -%} RAW_DATA_QA
+      {%- else -%} invalid_db
+      {%- endif -%}
+    tables:
+      - name: get_worker
+
+  - name: src_data
+    description: 'stage snapshot data'
+    database: |
+      {%- if target.name == "dev" -%} DBT
+      {%- elif target.name == "qa" -%} DBT_DB_QA
+      {%- else -%} invalid_db
+      {%- endif -%}
+  
+    schema: |
+      {%- if target.name == "dev" -%} SRC
+      {%- elif target.name == "qa" -%} SRC_QA
+      {%- else -%} invalid_db
+      {%- endif -%}
+   
+  - name: dwh_data
+    description: 'dimension and facts data' 
+    database: |
+      {%- if target.name == "dev" -%} DBT
+      {%- elif target.name == "qa" -%} DBT_QA
+      {%- else -%} invalid_db
+      {%- endif -%}
+
+    schema: |
+      {%- if target.name == "dev" -%} DWH
+      {%- elif target.name == "qa" -%} DWH_QA
+      {%- else -%} invalid_db
+      {%- endif -%}
+    tables:
+      - name: dim_worker_scd1
+      - name: dim_worker_scd2
+
+models:
+  - name: get_worker_stg
+    description: 'A dbt model to get all elements of json from raw_data table variant column for worker dimension'
+    config:
+      tags: ['worker_dimension']
+      materialized: ephemeral
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - wd_as_of_date
+            - workerid
+            - additionaljobs_id
+
+    columns:
+      - name: wd_as_of_date
+        description: "Workday data snapshot as of date column"
+        tests:
+          - not_null
+      - name: workerid
+        description: "ID of the worker, not null"
+        tests:
+          - not_null
+      - name: additionaljobs_id
+        description: "ID of the worker additional job, not null, should be unique for as of date snapshot"
+        tests:
+          - not_null
+
+  - name: get_worker_int
+    description: 'prepare worker dimension intermediate data for type 1 incremental model, fill out our system fields: INSERT_TS, UPDATE_TS, ETL_GMTS'
+    config:
+      tags: ['worker_dimension']
+      materialized: ephemeral
+      
+  - name: dim_worker_ins_upd
+    description: 'Load SCD type 1 into worker dimension dim_worker_scd1 table'
+    config:
+      tags: ['worker_dimension']
+      materialized: incremental
+      unique_key: ['WORKERID', 'ADDITIONALJOBS_ID']
+      alias: dim_worker_scd1
+
+snapshots:
+  - name: dim_worker_type2
+    description: 'Load SCD type 2 into worker dimension dim_worker_scd2 table'
+    config:
+      tags: ['worker_dimension']
+      target_database: 'DBT'
+      target_schema: 'DWH'
+      unique_key: "WORKERID||'-'||ADDITIONALJOBS_ID"
+      check_cols: ['ADDITIONALJOBS_LOCATION']
+      strategy: check
+    
+
+
+
